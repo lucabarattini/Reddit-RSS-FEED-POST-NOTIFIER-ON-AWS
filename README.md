@@ -27,13 +27,13 @@ graph TD
     %% Nodes
     A[EventBridge Rule] -->|Triggers every 2 mins| B(AWS Lambda Function)
     B -->|Fetch RSS Feed| C[Reddit]
-    B -->|Check if ID exists & Save ID| D[(DynamoDB Table)]
+    B -->|Check if ID exists| D[(DynamoDB Table)]
     
     B -->|If New Listing| E{Bedrock AI Analysis}
     E -->|Prompt: Is this a 2BR Entire Unit?| F[Google Gemma 3 Model]
     
     F -->|Response: SKIP| G[Ignore]
-    F -->|Response: SEND| H[Amazon SNS]
+    F -->|Response: SEND| G[Amazon SNS]
     
     H -->|Email Notification| I[User Inbox]
     B -->|Feedback loop| D
