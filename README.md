@@ -47,11 +47,11 @@ graph TD
     classDef ignore fill:#B0BEC5,stroke:#232F3E,stroke-width:1px,color:black;
 
     %% Assign Classes
-    class A,B,H aws;
+    class A,B aws;
     class D db;
     class F,E ai;
     class C source;
-    class I user;
+    class I, H user;
     class G ignore;
 ```
 ## 🛠️ Prerequisites
