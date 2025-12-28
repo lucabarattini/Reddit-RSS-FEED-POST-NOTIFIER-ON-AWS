@@ -134,12 +134,14 @@ We feed the Reddit post title and body into the LLM with a set of instructions. 
 Here is the actual prompt used in the code to enforce our desired filters:
 
 ```python
+prompt_text = f"""
+
 You are an AI Real Estate Agent filtering NYC apartments.
 
 TASK: Analyze this listing. Reply ONLY with "SEND" or "SKIP".
 
 CRITERIA (All must be true for SEND):
-1. It is a 2-Bedroom apartment (2-BR, 2 Bed).
+1. It is a 2-Bedroom apartment (2BR, 2 Bed).
 2. ENTIRE unit only (NO roommates, NO single rooms).
 3. NOT asking for advice/feedback.
 4. Location is NOT: Brooklyn, NJ, LIC, or Roosevelt Island.
@@ -149,6 +151,8 @@ Title: {title}
 Body: {body}
 
 RESPONSE:
+
+"""
 ```
 ## ⚙️ Customization
 
