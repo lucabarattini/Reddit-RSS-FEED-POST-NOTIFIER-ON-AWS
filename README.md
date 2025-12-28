@@ -27,7 +27,7 @@ graph TD
     %% Nodes
     A[EventBridge Rule] -->|Triggers every 2 mins| B(AWS Lambda Function)
     B -->|Fetch RSS Feed| C[Reddit]
-    B -->|Check if ID exists| D[(DynamoDB Table)]
+    B -->|Check if ID exists & Save ID| D[(DynamoDB Table)]
     
     B -->|If New Listing| E{Bedrock AI Analysis}
     E -->|Prompt: Is this a 2BR Entire Unit?| F[Google Gemma 3 Model]
@@ -44,15 +44,15 @@ graph TD
     classDef ai fill:#8C4FFF,stroke:#232F3E,stroke-width:2px,color:white;
     classDef source fill:#FF4500,stroke:#232F3E,stroke-width:2px,color:white;
     classDef user fill:#00C853,stroke:#232F3E,stroke-width:2px,color:white;
-    classDef ignore fill:#B0BEC5,stroke:#232F3E,stroke-width:1px,color:black;
+    classDef grey fill:#B0BEC5,stroke:#232F3E,stroke-width:2px,color:black;
 
     %% Assign Classes
     class A,B aws;
     class D db;
     class F,E ai;
     class C source;
-    class I, H user;
-    class G ignore;
+    class I user;
+    class G,H grey;
 ```
 ## 🛠️ Prerequisites
 
