@@ -1,5 +1,5 @@
 # 🔔 Reddit RSS Feed Keyword Monitor & AWS Notifier
-### 🏙️ Specific Use Case: <br/> <br/> Finding a house in NYC sucks. I tried to fix it.
+### 🏙️ Specific Use Case: <br/> <br/> Finding a house in NYC sucks. I tried to fix it. <br/>Now i have no more excuse to find a house :)
 ---
 <br/>
 
@@ -24,9 +24,10 @@ Instead of manually refreshing Reddit, this system acts as an **Intelligent RSS 
 
 ```mermaid
 graph TD
+    %% Nodes
     A[EventBridge Rule] -->|Triggers every 2 mins| B(AWS Lambda Function)
     B -->|Fetch RSS Feed| C[Reddit]
-    B -->|Check if ID exists| D[(DynamoDB Table)]
+    B -->|Check if ID exists & Save ID| D[(DynamoDB Table)]
     
     B -->|If New Listing| E{Bedrock AI Analysis}
     E -->|Prompt: Is this a 2BR Entire Unit?| F[Google Gemma 3 Model]
@@ -35,7 +36,23 @@ graph TD
     F -->|Response: SEND| H[Amazon SNS]
     
     H -->|Email Notification| I[User Inbox]
-    B -->|Save ID & Timestamp| D
+    B -->|Feedback loop| D
+
+    %% Styling
+    classDef aws fill:#FF9900,stroke:#232F3E,stroke-width:2px,color:white;
+    classDef db fill:#3E54E8,stroke:#232F3E,stroke-width:2px,color:white;
+    classDef ai fill:#8C4FFF,stroke:#232F3E,stroke-width:2px,color:white;
+    classDef source fill:#FF4500,stroke:#232F3E,stroke-width:2px,color:white;
+    classDef user fill:#00C853,stroke:#232F3E,stroke-width:2px,color:white;
+    classDef ignore fill:#B0BEC5,stroke:#232F3E,stroke-width:1px,color:black;
+
+    %% Assign Classes
+    class A,B,H aws;
+    class D db;
+    class F,E ai;
+    class C source;
+    class I user;
+    class G ignore;
 ```
 ## 🛠️ Prerequisites
 
