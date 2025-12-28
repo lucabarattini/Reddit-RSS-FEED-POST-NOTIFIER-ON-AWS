@@ -33,7 +33,7 @@ graph TD
     E -->|Prompt: Is this a 2BR Entire Unit?| F[Google Gemma 3 Model]
     
     F -->|Response: SKIP| G[Ignore]
-    F -->|Response: SEND| G[Amazon SNS]
+    F -->|Response: SEND| H[Amazon SNS]
     
     H -->|Email Notification| I[User Inbox]
     B -->|Feedback loop| D
