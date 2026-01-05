@@ -6,13 +6,9 @@ import time
 import json
 from datetime import datetime, timezone
 
-# --- CONFIGURATION RSS FEED REDDIT ---
+# --- CONFIGURATION ---
 RSS_URL = "https://www.reddit.com/r/LeaseTakeoverNYC+NYCapartments/search.rss?q=%28%222BR%22+OR+%22Two+bed%22+OR+%22Two+bedrooms%22+OR+%222B%22+OR+%22Two+B%22%29&restrict_sr=1&sort=new"
-
-# Using Google Gemma 3 12B 
 BEDROCK_MODEL_ID = "google.gemma-3-12b-it"
-
-# XML Namespace for Atom Feeds 
 NAMESPACES = {'atom': 'http://www.w3.org/2005/Atom'}
 
 sns = boto3.client('sns')
@@ -22,70 +18,80 @@ bedrock = boto3.client('bedrock-runtime')
 SNS_TOPIC_ARN = os.environ.get('SNS_TOPIC_ARN') 
 TABLE_NAME = os.environ.get('TABLE_NAME') 
 
-def get_seen_posts(table):
-    """Retrieves posts already seen from the DB."""
+### Function Definition: ###
+def get_seen_posts(table) -> set:
     response = table.scan()
     items = response.get('Items', [])
-    print(f"[DB] Retrieved {len(items)} previously seen posts from database.")
     return {item['post_id'] for item in items}
 
-def save_post_id(table, post_id, title):
-    """Saves a post in the DB as 'seen' with a 14-day expiration."""
+### Function Definition: ###
+def save_post_result(table, post_id, title, status, reason) -> None:
     ttl = int(time.time()) + (14 * 24 * 60 * 60) 
     found_at = datetime.now(timezone.utc).isoformat()
+    # We now save the status (SEND/SKIP) and the Reason
     table.put_item(Item={
         'post_id': post_id, 
         'title': title, 
         'found_at': found_at, 
+        'status': status,
+        'reason': reason,
         'ttl': ttl
     })
 
-def ask_bedrock_analysis(title, body):
-    """
-    Asks Google Gemma if the apartment meets the criteria.
-    Returns True ("SEND") or False ("SKIP").
-    """
-    
+### Function Definition: ###
+def ask_bedrock_analysis(title, body) -> tuple:
+    # Revised prompt requesting JSON and clarifying the roommate rule
     prompt_text = f"""
     You are an AI Real Estate Agent filtering NYC apartments.
     
-    TASK: Analyze this listing. Reply ONLY with "SEND" or "SKIP".
+    TASK: Analyze this listing and provide a JSON response.
     
-    CRITERIA (All must be true for SEND):
-    1. It is a 2-Bedroom apartment (2BR, 2 Bed).
-    2. ENTIRE unit only (NO roommates, NO single rooms).
-    3. NOT asking for advice/feedback.
-    4. Location is NOT: Brooklyn, NJ, LIC, or Roosevelt Island.
+    CRITERIA FOR "SEND":
+    1. 2-Bedroom unit (2BR, 2 Bed).
+    2. ENTIRE UNIT ONLY. 
+       - REJECT if user is offering a single room/subletting one room.
+       - ACCEPT if current tenants (even if called "roommates") are moving out and the WHOLE unit is available.
+    3. NOT asking for advice.
+    4. Location is MANHATTAN only (Exclude Brooklyn, NJ, LIC, Roosevelt Island).
     
     LISTING:
     Title: {title}
     Body: {body}
     
-    RESPONSE:
+    OUTPUT FORMAT:
+    You must output strictly valid JSON with no markdown formatting:
+    {{
+        "decision": "SEND" or "SKIP",
+        "reason": "Brief explanation of why"
+    }}
     """
 
     try:
         response = bedrock.converse(
             modelId=BEDROCK_MODEL_ID,
-            messages=[{
-                "role": "user",
-                "content": [{"text": prompt_text}]
-            }],
-            inferenceConfig={
-                "maxTokens": 10, 
-                "temperature": 0
-            }
+            messages=[{"role": "user", "content": [{"text": prompt_text}]}],
+            inferenceConfig={"maxTokens": 100, "temperature": 0}
         )
         
-        ai_decision = response['output']['message']['content'][0]['text'].strip().upper()
-        print(f"  🤖 Gemma Answer: {ai_decision}")
+        raw_text = response['output']['message']['content'][0]['text'].strip()
         
-        return "SEND" in ai_decision
+        # Clean up code blocks if the model adds them
+        if raw_text.startswith("```"):
+            raw_text = raw_text.strip("`json").strip("`")
+
+        result = json.loads(raw_text)
+        decision = result.get("decision", "SKIP").upper()
+        reason = result.get("reason", "No reason provided")
+        
+        print(f"  🤖 Gemma: {decision} | Reason: {reason}")
+        return decision, reason
 
     except Exception as e:
         print(f"  ⚠️ Gemma Error: {e}")
-        return True
-        
+        # Default to sending if error, but note the error
+        return "SEND", f"Error: {str(e)}"
+
+### Function Definition: ###
 def lambda_handler(event, context):
     print("--- STARTING SCRAPER RUN ---")
     
@@ -98,89 +104,63 @@ def lambda_handler(event, context):
     try:
         with urllib.request.urlopen(req) as response:
             xml_data = response.read()
-        print("RSS Feed fetched successfully.")
     except Exception as e:
         print(f"CRITICAL ERROR fetching RSS: {e}")
         return
         
     root = ET.fromstring(xml_data)
-    
     entries = root.findall("atom:entry", NAMESPACES)
-    print(f"RSS contains {len(entries)} total entries.")
     
     table = dynamodb.Table(TABLE_NAME)
     seen_ids = get_seen_posts(table)
     found_apartments = []
     
     today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
-    print(f"Filtering for date: {today_str}")
-    
-    skipped_db = 0
-    skipped_date = 0
     
     for entry in entries:
         post_id = entry.find("atom:id", NAMESPACES).text
         title = entry.find("atom:title", NAMESPACES).text
         
-        # --- 1. Check ID (Database) ---
         if post_id in seen_ids:
-            skipped_db += 1
             continue
             
-        print(f"\n🔎 Processing New Post: {title}")
+        print(f"\n🔎 New Post: {title}")
         
         link = entry.find("atom:link", NAMESPACES).attrib['href']
-        published_raw = entry.find("atom:updated", NAMESPACES).text
-        published_date = published_raw.split('T')[0]
+        published_date = entry.find("atom:updated", NAMESPACES).text.split('T')[0]
         content_html = entry.find("atom:content", NAMESPACES).text or ""
         
-        # --- 2. Check Date ---
         if published_date != today_str:
-            print(f"  ❌ Skipped (Old Date): Post is from {published_date}, we only want {today_str}")
-            print(f"  🚫 Bedrock NOT invoked.")
-            skipped_date += 1
-            save_post_id(table, post_id, title)
+            print(f"  ❌ Skipped (Old Date)")
+            save_post_result(table, post_id, title, "SKIP", "Old Date")
             continue
 
-        # --- 3. Check AI ---
         print(f"  🧠 Sending to Bedrock AI...")
-        is_valid = ask_bedrock_analysis(title, content_html)
+        decision, reason = ask_bedrock_analysis(title, content_html)
         
-        if is_valid:
-            print(f"  ✅ MATCH! Adding to email list.")
-            found_apartments.append({'title': title, 'link': link})
+        save_post_result(table, post_id, title, decision, reason)
+        
+        if decision == "SEND":
+            print(f"  ✅ MATCH!")
+            found_apartments.append({'title': title, 'link': link, 'reason': reason})
         else:
-            print(f"  🗑️ Rejected by AI criteria.")
-            
-        save_post_id(table, post_id, title)
+            print(f"  🗑️ Rejected.")
 
-    # --- SUMMARY LOGS ---
-    print(f"\n--- REPORT ---")
-    print(f"Total entries: {len(entries)}")
-    print(f"Skipped (Already in DB): {skipped_db}")
-    print(f"Skipped (Old Date): {skipped_date}")
-    print(f"Sent to AI: {len(entries) - skipped_db - skipped_date}")
-    
     if found_apartments:
         print(f"📧 Sending email with {len(found_apartments)} validated apartments.")
-        
-        message_lines = [f"✨ {len(found_apartments)} NEW APARTMENTS (AI VERIFIED)", "="*30, ""]
+        message_lines = [f"✨ {len(found_apartments)} NEW APARTMENTS", "="*30, ""]
         
         for apt in found_apartments:
             message_lines.append(f"🏠 {apt['title']}")
+            message_lines.append(f"💡 AI Note: {apt['reason']}")
             message_lines.append(f"🔗 {apt['link']}")
             message_lines.append("-" * 30)
             
-        message_lines.append("\n\n\n") 
-            
-        email_body = "\n".join(message_lines)
-        
         sns.publish(
             TopicArn=SNS_TOPIC_ARN,
-            Message=email_body,
-            Subject=f"✨ {len(found_apartments)} New Apartments (AI Filtered)"
+            Message="\n".join(message_lines),
+            Subject=f"✨ {len(found_apartments)} New Apartments Found"
         )
         return f"Sent {len(found_apartments)} alerts."
-    else:
-        print("🏁 Run complete. No new apartments matched criteria.")
-        return "No email sent."
+    
+    return "No new matches."
